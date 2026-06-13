@@ -4,15 +4,16 @@ from agent_template.core.agent import Agent
 from agent_template.core.tools.base import Tool
 
 
-def agents_to_tools(agents: list[Agent]) -> list[Tool]:
-    return [_AgentTool(agent) for agent in agents]
+def agents_to_tools(agents: list[Agent], system_prompts: list[str]) -> list[Tool]:
+    return [_AgentTool(agent, prompt) for agent, prompt in zip(agents, system_prompts)]
 
 
 class _AgentTool(Tool):
     concurrency_safe = False
 
-    def __init__(self, agent: Agent):
+    def __init__(self, agent: Agent, system_prompt: str = ""):
         self._agent = agent
+        self._system_prompt = system_prompt
 
     @property
     def schema(self) -> dict[str, Any]:
@@ -29,4 +30,4 @@ class _AgentTool(Tool):
                 f"Tool '{self._agent.config.name}' requires 'content' parameter. "
                 f"Expected format: {schema}"
             )
-        return self._agent.run(kwargs["content"])
+        return self._agent.run(kwargs["content"], system_prompt=self._system_prompt)
