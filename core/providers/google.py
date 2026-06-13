@@ -1,9 +1,9 @@
 from __future__ import annotations
 import base64
 import urllib.request
-from typing import Any
+from typing import Any, Generator
 from agent_template.core.providers.base import LLMProvider
-from agent_template.core.agent import LLMResponse, ToolCall
+from agent_template.core.agent import LLMResponse, ToolCall, StreamChunk
 
 
 class GoogleProvider(LLMProvider):
@@ -20,6 +20,47 @@ class GoogleProvider(LLMProvider):
             kwargs["http_options"] = {"base_url": self._base_url}
         return genai.Client(**kwargs)
 
+    def _parse_tool_calls(self, function_calls: list[Any]) -> list[ToolCall]:
+        return [
+            ToolCall(
+                id=fc.id or "",
+                name=fc.name,
+                arguments=dict(fc.args),
+            )
+            for fc in function_calls
+        ]
+
+    def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        model: str,
+    ) -> int:
+        client = self._get_client()
+        contents = self._format_messages(messages)
+        config = self._build_config(system_prompt, tools)
+        response = client.models.count_tokens(model=model, contents=contents, config=config)
+        return response.total_tokens
+
+    def _build_config(
+        self,
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        output_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        config: dict[str, Any] = {}
+        if system_prompt:
+            config["system_instruction"] = system_prompt
+        if tools:
+            config["tools"] = [self._convert_tool(t) for t in tools]
+        if output_schema:
+            config["response_mime_type"] = "application/json"
+            config["response_schema"] = output_schema
+        config.update(kwargs)
+        return config
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -31,17 +72,7 @@ class GoogleProvider(LLMProvider):
     ) -> LLMResponse:
         client = self._get_client()
         contents = self._format_messages(messages)
-
-        config: dict[str, Any] = {}
-        if system_prompt:
-            config["system_instruction"] = system_prompt
-        if tools:
-            config["tools"] = [self._convert_tool(t) for t in tools]
-        if output_schema:
-            config["response_mime_type"] = "application/json"
-            config["response_schema"] = output_schema
-
-        config.update(kwargs)
+        config = self._build_config(system_prompt, tools, output_schema, **kwargs)
 
         response = client.models.generate_content(
             model=model,
@@ -63,12 +94,7 @@ class GoogleProvider(LLMProvider):
 
         tool_calls = []
         if response.function_calls:
-            for fc in response.function_calls:
-                tool_calls.append(ToolCall(
-                    id=fc.id or "",
-                    name=fc.name,
-                    arguments=dict(fc.args),
-                ))
+            tool_calls = self._parse_tool_calls(response.function_calls)
 
         input_tokens = 0
         output_tokens = 0
@@ -78,6 +104,55 @@ class GoogleProvider(LLMProvider):
 
         return LLMResponse(
             content=content if content else [{"type": "text", "text": response.text or ""}],
+            tool_calls=tool_calls,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    def complete_stream(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        model: str,
+        output_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, LLMResponse]:
+        client = self._get_client()
+        contents = self._format_messages(messages)
+        config = self._build_config(system_prompt, tools, output_schema, **kwargs)
+
+        content_text = ""
+        tool_calls: list[ToolCall] = []
+        input_tokens = 0
+        output_tokens = 0
+
+        for chunk in client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=config,
+        ):
+            if chunk.candidates:
+                for part in chunk.candidates[0].content.parts:
+                    if part.text:
+                        content_text += part.text
+                        yield StreamChunk(delta=part.text)
+
+            if chunk.function_calls:
+                parsed = self._parse_tool_calls(chunk.function_calls)
+                for tc in parsed:
+                    yield StreamChunk(tool_name=tc.name)
+                tool_calls.extend(parsed)
+
+            if chunk.usage_metadata:
+                input_tokens = chunk.usage_metadata.prompt_token_count or 0
+                output_tokens = chunk.usage_metadata.candidates_token_count or 0
+
+        for tc in tool_calls:
+            yield StreamChunk(tool_call=tc)
+
+        return LLMResponse(
+            content=[{"type": "text", "text": content_text}],
             tool_calls=tool_calls,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

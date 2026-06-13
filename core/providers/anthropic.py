@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Generator
 from agent_template.core.providers.base import LLMProvider
-from agent_template.core.agent import LLMResponse, ToolCall
+from agent_template.core.agent import LLMResponse, ToolCall, StreamChunk
 
 
 class AnthropicProvider(LLMProvider):
@@ -14,7 +14,33 @@ class AnthropicProvider(LLMProvider):
         import anthropic
         return anthropic.Anthropic(api_key=self._api_key, base_url=self._base_url)
 
-    def complete(
+    def _parse_content_blocks(self, blocks: list[Any]) -> tuple[list[dict[str, Any]], list[ToolCall]]:
+        content: list[dict[str, Any]] = []
+        tool_calls: list[ToolCall] = []
+        for block in blocks:
+            if block.type == "text":
+                content.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                tool_calls.append(ToolCall(
+                    id=block.id,
+                    name=block.name,
+                    arguments=block.input,
+                ))
+        return content, tool_calls
+
+    def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        model: str,
+    ) -> int:
+        client = self._get_client()
+        params = self._build_params(messages, system_prompt, tools, model)
+        response = client.messages.count_tokens(**params)
+        return response.input_tokens
+
+    def _build_params(
         self,
         messages: list[dict[str, Any]],
         system_prompt: str,
@@ -22,8 +48,7 @@ class AnthropicProvider(LLMProvider):
         model: str,
         output_schema: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> LLMResponse:
-        client = self._get_client()
+    ) -> dict[str, Any]:
         normalized = [self._normalize_message(m) for m in messages]
         params: dict[str, Any] = {
             "model": model,
@@ -40,28 +65,86 @@ class AnthropicProvider(LLMProvider):
                     "schema": output_schema,
                 },
             }
-
         params.update(kwargs)
+        return params
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        model: str,
+        output_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        client = self._get_client()
+        params = self._build_params(messages, system_prompt, tools, model, output_schema, **kwargs)
 
         response = client.messages.create(**params)
 
-        content: list[dict[str, Any]] = []
-        tool_calls = []
-        for block in response.content:
-            if block.type == "text":
-                content.append({"type": "text", "text": block.text})
-            elif block.type == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block.id,
-                    name=block.name,
-                    arguments=block.input,
-                ))
+        content, tool_calls = self._parse_content_blocks(response.content)
 
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
+        )
+
+    def complete_stream(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        model: str,
+        output_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, LLMResponse]:
+        client = self._get_client()
+        params = self._build_params(messages, system_prompt, tools, model, output_schema, **kwargs)
+
+        content_text = ""
+        tool_calls: list[ToolCall] = []
+        tool_calls_by_id: dict[str, dict[str, Any]] = {}
+        input_tokens = 0
+        output_tokens = 0
+
+        with client.messages.stream(**params) as stream:
+            for event in stream:
+                if event.type == "content_block_start":
+                    block = event.content_block
+                    if block.type == "tool_use":
+                        tool_calls_by_id[block.id] = {
+                            "id": block.id,
+                            "name": block.name,
+                            "arguments": "",
+                        }
+                        yield StreamChunk(tool_name=block.name)
+                elif event.type == "content_block_delta":
+                    delta = event.delta
+                    if delta.type == "text_delta":
+                        content_text += delta.text
+                        yield StreamChunk(delta=delta.text)
+                    elif delta.type == "input_json_delta":
+                        for tc_id, tc_data in tool_calls_by_id.items():
+                            if tc_id in str(delta):
+                                tc_data["arguments"] += delta.partial_json
+                                break
+
+            final_message = stream.get_final_message()
+            input_tokens = final_message.usage.input_tokens
+            output_tokens = final_message.usage.output_tokens
+
+            _, tool_calls = self._parse_content_blocks(final_message.content)
+
+        for tc in tool_calls:
+            yield StreamChunk(tool_call=tc)
+
+        return LLMResponse(
+            content=[{"type": "text", "text": content_text}],
+            tool_calls=tool_calls,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
     def _normalize_message(self, msg: dict[str, Any]) -> dict[str, Any]:

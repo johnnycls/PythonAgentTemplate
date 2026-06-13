@@ -30,6 +30,5 @@ class Memory(ABC):
     def compact(self) -> None:
         pass
 
-    @abstractmethod
     def clear(self) -> None:
         pass

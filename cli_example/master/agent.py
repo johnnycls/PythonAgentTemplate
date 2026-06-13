@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Generator
 
-from agent_template.core.agent import Agent, AgentConfig
+from agent_template.core.agent import Agent, AgentConfig, StreamChunk
 from agent_template.core.memory import Content
 from agent_template.cli_example.config import ollama_provider
 from agent_template.cli_example.master.memory import MasterMemory
@@ -28,9 +28,15 @@ class MasterAgent(Agent):
         super().__init__(config=config, memory=memory, tools=tools)
 
     def run(self, input: list[dict[str, Any]], system_prompt: str = "") -> Content:
+        system_prompt = self._build_system_prompt()
+        return super().run(input, system_prompt=system_prompt)
+
+    def run_stream(self, input: list[dict[str, Any]], system_prompt: str = "") -> Generator[StreamChunk, None, Content]:
+        system_prompt = self._build_system_prompt()
+        yield from super().run_stream(input, system_prompt=system_prompt)
+
+    def _build_system_prompt(self) -> str:
         summary = self.memory.get_summary()
         if summary:
-            system_prompt = f"{SYSTEM_PROMPT}\n\nConversation summary:\n{summary}"
-        else:
-            system_prompt = SYSTEM_PROMPT
-        return super().run(input, system_prompt=system_prompt)
+            return f"{SYSTEM_PROMPT}\n\nConversation summary:\n{summary}"
+        return SYSTEM_PROMPT

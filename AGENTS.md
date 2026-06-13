@@ -25,10 +25,3 @@
 ```bash
 python -m agent_template.cli_example.main
 ```
-
-## Conventions
-
-- Config files: `config.py` for values, `prompts.py` for prompts, `schemas.py` for schemas
-- Memory classes: `MasterMemory` (master), `SubagentMemory` (subagents)
-- Subagent tools exported from `cli_example/subagents/tools.py`
-- Core files use `from __future__ import annotations`

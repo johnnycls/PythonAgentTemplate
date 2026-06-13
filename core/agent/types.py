@@ -25,3 +25,10 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+
+
+@dataclass
+class StreamChunk:
+    delta: str | None = None
+    tool_call: ToolCall | None = None
+    tool_name: str | None = None
