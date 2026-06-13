@@ -12,30 +12,26 @@ cp .env.example .env  # Fill API keys for your providers
 ## Quick Start
 
 ```python
-from agent_template.core import Agent, AgentConfig, Runner, ToolRegistry
-from agent_template.core.providers.registry import ProviderRegistry
+from agent_template.core import Agent, AgentConfig
 from agent_template.core.providers.openai_compat import OpenAICompatProvider
 from agent_template.cli_example.cli_memory import CLIMemory
 
-# 1. Register providers
-providers = ProviderRegistry()
-providers.register(OpenAICompatProvider(name="ollama", api_key="ollama", base_url="http://localhost:11434/v1"))
+# 1. Create provider
+provider = OpenAICompatProvider(name="ollama", api_key="ollama", base_url="http://localhost:11434/v1")
 
 # 2. Configure agent
 config = AgentConfig(
     name="my_agent",
     description="A helpful assistant.",
     system_prompt="You are a helpful assistant.",
-    provider="ollama",
+    provider=provider,
     model="llama3",
     input_schema={"type": "object", "properties": {"content": {"type": "array"}}, "required": ["content"]},
 )
 
 # 3. Wire it up
-runner = Runner(providers=providers, provider_name=config.provider)
-memory = CLIMemory(runner=runner, model=config.model, provider_kwargs=config.provider_kwargs)
-tools = ToolRegistry()
-agent = Agent(config=config, runner=runner, memory=memory, tools=tools)
+memory = CLIMemory(provider=provider, model=config.model, provider_kwargs=config.provider_kwargs)
+agent = Agent(config=config, memory=memory)
 
 # 4. Run
 response = agent.run([{"type": "text", "text": "Hello"}])
@@ -52,15 +48,13 @@ python -m agent_template.cli_example.main
 ```
 agent_template/
 ├── core/                    # Framework — no hardcoded logic
-│   ├── agent.py             # Agent + AgentConfig
-│   ├── runner.py            # LLM call loop + tool execution
+│   ├── agent.py             # Agent + AgentConfig + dataclasses
 │   ├── memory.py            # Memory ABC + Message + Content type
 │   ├── providers/           # LLM providers (Anthropic, OpenAI-compat, Google)
-│   └── tools/               # Tool ABC, registry, subagent-as-tool
+│   └── tools/               # Tool ABC, subagent-as-tool
 ├── cli_example/             # Reference implementation
 │   ├── main.py              # CLI entry point
 │   ├── cli_memory.py        # CLIMemory (deque-based, with compaction)
-│   ├── providers.py         # build_providers()
 │   ├── subagents/           # Example subagent configs
 │   └── tools/               # Example tools (Echo)
 └── env.py                   # Loads .env via dotenv
@@ -80,7 +74,7 @@ agent_template/
 - Anthropic/OpenAI: `max_tokens`, `temperature`
 - Google: `max_output_tokens`, `temperature`
 
-**Tools** — Return a schema dict directly, no wrapper class:
+**Tools** — Pass a list of Tool instances directly to Agent:
 
 ```python
 from agent_template.core.tools.base import Tool
@@ -92,16 +86,18 @@ class MyTool(Tool):
 
     def execute(self, **kwargs):
         return {"result": "done"}
+
+agent = Agent(config=config, memory=memory, tools=[MyTool()])
 ```
 
-**Subagents as tools** — Wrap an `Agent` as a tool, auto-registered:
+**Subagents as tools** — Convert agents to tools:
 
 ```python
-from agent_template.core.tools.subagent import register_subagents_as_tools
+from agent_template.core.tools.subagent import agents_to_tools
 
 subagents = [agent1, agent2]
-register_subagents_as_tools(subagents, tool_registry)
-# Now "agent1" and "agent2" appear as callable tools
+tools = agents_to_tools(subagents)
+agent = Agent(config=config, memory=memory, tools=tools)
 ```
 
 **Compaction** — Memory owns the compact logic. Triggered when `input_tokens > context_window * compact_threshold`.

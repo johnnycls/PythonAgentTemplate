@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 from agent_template.core.providers.base import LLMProvider
-from agent_template.core.runner import LLMResponse, ToolCall
+from agent_template.core.agent import LLMResponse, ToolCall
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -18,6 +18,7 @@ class OpenAICompatProvider(LLMProvider):
         system_prompt: str,
         tools: list[dict[str, Any]],
         model: str,
+        output_schema: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         client = self._get_client()
@@ -29,6 +30,15 @@ class OpenAICompatProvider(LLMProvider):
         }
         if tools:
             params["tools"] = [self._convert_tool(t) for t in tools]
+        if output_schema:
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "output",
+                    "strict": True,
+                    "schema": output_schema,
+                },
+            }
 
         params.update(kwargs)
 

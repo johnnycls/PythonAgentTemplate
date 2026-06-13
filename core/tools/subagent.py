@@ -2,16 +2,10 @@ from __future__ import annotations
 from typing import Any
 from agent_template.core.agent import Agent
 from agent_template.core.tools.base import Tool
-from agent_template.core.tools.registry import ToolRegistry
 
 
-def register_subagents_as_tools(
-    agents: list[Agent],
-    tool_registry: ToolRegistry,
-) -> None:
-    for agent in agents:
-        tool = _AgentTool(agent)
-        tool_registry.register(tool)
+def agents_to_tools(agents: list[Agent]) -> list[Tool]:
+    return [_AgentTool(agent) for agent in agents]
 
 
 class _AgentTool(Tool):

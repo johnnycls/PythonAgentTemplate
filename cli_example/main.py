@@ -1,24 +1,37 @@
 from agent_template.env import env
 from agent_template.core.agent import Agent, AgentConfig
-from agent_template.core.runner import Runner
+from agent_template.core.providers.openai_compat import OpenAICompatProvider
 from agent_template.cli_example.cli_memory import CLIMemory
-from agent_template.core.tools.registry import ToolRegistry
-from agent_template.core.tools.subagent import register_subagents_as_tools
-from agent_template.cli_example.providers import build_providers
-from agent_template.cli_example.subagents import build_subagents
+from agent_template.core.tools.subagent import agents_to_tools
+from agent_template.cli_example.subagents import RESEARCHER
+from agent_template.cli_example.subagents.build import build_subagents
 from agent_template.cli_example.tools import Echo
 
 
+SYSTEM_PROMPT = """You are a helpful assistant.
+- "result" contains your full answer.
+- "options" is a list of strings: answer choices if you are asking a question,
+  or suggested follow-up questions the user might ask. Use an empty list if none."""
+
+memory_provider = OpenAICompatProvider(name="ollama", api_key="ollama", base_url="http://localhost:11434/v1")
+memory_model = "llama3"
+memory_provider_kwargs: dict = {}
+
+
 def main():
-    providers = build_providers()
-    subagent_agents = build_subagents(providers=providers, tool_registry=ToolRegistry())
+    subagent_agents = build_subagents(
+        configs=[RESEARCHER],
+        memory_provider=memory_provider,
+        memory_model=memory_model,
+        memory_provider_kwargs=memory_provider_kwargs,
+    )
 
     config = AgentConfig(
         name="main",
         description="A helpful assistant.",
-        system_prompt="You are a helpful assistant.",
-        provider="ollama",
-        model="llama3",
+        system_prompt=SYSTEM_PROMPT,
+        provider=memory_provider,
+        model=memory_model,
         provider_kwargs={"max_tokens": 4096, "temperature": 0.7},
         input_schema={
             "type": "object",
@@ -30,14 +43,20 @@ def main():
             },
             "required": ["content"],
         },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "result": {"type": "string"},
+                "options": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["result", "options"],
+        },
     )
-    runner = Runner(providers=providers, provider_name=config.provider)
-    memory = CLIMemory(runner=runner, model=config.model, provider_kwargs=config.provider_kwargs)
-    tools = ToolRegistry()
-    tools.register(Echo())
-    register_subagents_as_tools(subagent_agents, tools)
+    memory = CLIMemory(provider=memory_provider, model=memory_model, provider_kwargs=config.provider_kwargs)
 
-    agent = Agent(config=config, runner=runner, memory=memory, tools=tools)
+    tools = [Echo()] + agents_to_tools(subagent_agents)
+
+    agent = Agent(config=config, memory=memory, tools=tools)
 
     while True:
         user_input = input("You: ")

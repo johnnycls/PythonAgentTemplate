@@ -3,18 +3,18 @@ from typing import Any
 from collections import deque
 
 from agent_template.core.memory import Memory, Message, Content
-from agent_template.core.runner import Runner
+from agent_template.core.providers.base import LLMProvider
 
 
 class CLIMemory(Memory):
     def __init__(
         self,
-        runner: Runner,
+        provider: LLMProvider,
         model: str,
         provider_kwargs: dict[str, Any] | None = None,
         max_working_messages: int = 50,
     ):
-        self._runner = runner
+        self._provider = provider
         self._model = model
         self._provider_kwargs = provider_kwargs or {}
         self._messages: deque[Message] = deque(maxlen=max_working_messages)
@@ -38,7 +38,7 @@ class CLIMemory(Memory):
         messages = []
         if self._compacted_summary:
             messages.append({"role": "system", "content": f"Conversation summary: {self._compacted_summary}"})
-        
+
         for msg in self._messages:
             m: dict[str, Any] = {"role": msg.role, "content": msg.content}
             if msg.tool_call_id:
@@ -50,7 +50,7 @@ class CLIMemory(Memory):
 
     def compact(self) -> None:
         compact_prompt = "Summarize the conversation history concisely, preserving key facts and decisions."
-        summary_response = self._runner.run(
+        summary_response = self._provider.complete(
             messages=[{"role": "user", "content": compact_prompt}],
             system_prompt="",
             tools=[],

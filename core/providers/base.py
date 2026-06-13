@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent_template.core.runner import LLMResponse
+    from agent_template.core.agent import LLMResponse
 
 
 @dataclass
@@ -20,6 +20,7 @@ class LLMProvider(ABC):
         system_prompt: str,
         tools: list[dict[str, Any]],
         model: str,
+        output_schema: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> "LLMResponse":
         pass
