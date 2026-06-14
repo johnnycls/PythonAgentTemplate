@@ -4,8 +4,10 @@ from collections import deque
 
 from agent_template.core.memory import Memory, Message, Content
 from agent_template.core.providers.base import LLMProvider
-from agent_template.cli_example.subagents.memory.config import MAX_WORKING_MESSAGES, COMPACT_KEEP_MESSAGES
-from agent_template.cli_example.subagents.memory.prompts import COMPACTION_PROMPT
+
+MAX_WORKING_MESSAGES = 50
+COMPACT_KEEP_MESSAGES = 10
+COMPACTION_PROMPT = "Summarize the conversation history concisely, preserving key facts and decisions."
 
 
 class SubagentMemory(Memory):

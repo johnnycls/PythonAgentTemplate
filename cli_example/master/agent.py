@@ -5,11 +5,37 @@ from agent_template.core.agent import Agent, AgentConfig, StreamChunk
 from agent_template.core.memory import Content
 from agent_template.cli_example.config import ollama_provider
 from agent_template.cli_example.master.memory import MasterMemory
-from agent_template.cli_example.master.config import MODEL_NAME, MAX_TOKENS, TEMPERATURE
-from agent_template.cli_example.master.prompts import SYSTEM_PROMPT
-from agent_template.cli_example.master.schemas import INPUT_SCHEMA, OUTPUT_SCHEMA
-from agent_template.cli_example.subagents.tools import RESEARCHER_TOOL
+from agent_template.cli_example.subagents import RESEARCHER_TOOL
 from agent_template.cli_example.tools import Echo
+
+MODEL_NAME = "llama3"
+MAX_TOKENS = 4096
+TEMPERATURE = 0.7
+
+SYSTEM_PROMPT = """You are a helpful assistant.
+- "result" contains your full answer.
+- "options" is a list of strings: answer choices if you are asking a question,
+  or suggested follow-up questions the user might ask. Use an empty list if none."""
+
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "content": {
+            "type": "array",
+            "description": "Content blocks in standard format (e.g., [{type: 'text', text: '...'}])",
+        },
+    },
+    "required": ["content"],
+}
+
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "result": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["result", "options"],
+}
 
 
 class MasterAgent(Agent):

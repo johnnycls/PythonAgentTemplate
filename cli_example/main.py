@@ -1,5 +1,6 @@
-from agent_template.cli_example.master.prompts import EXIT_COMMANDS
 from agent_template.cli_example.master.agent import MasterAgent
+
+EXIT_COMMANDS = ("quit", "exit")
 
 
 def main():
