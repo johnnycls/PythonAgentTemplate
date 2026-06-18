@@ -1,8 +1,15 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from threading import Event
 from typing import Any
 
 from agent_template.core.memory.types import Content
+
+AbortEvent = Event
+
+
+class StreamAborted(Exception):
+    """Raised to break a stream iteration on abort."""
 
 
 @dataclass
@@ -32,3 +39,4 @@ class StreamChunk:
     delta: str | None = None
     tool_call: ToolCall | None = None
     tool_name: str | None = None
+    tool_result: str | None = None

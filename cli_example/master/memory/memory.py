@@ -27,8 +27,8 @@ class MasterMemory(Memory):
     def add_user_message(self, content: Content) -> None:
         self._messages.append(Message(role="user", content=content))
 
-    def add_assistant_message(self, content: Content) -> None:
-        self._messages.append(Message(role="assistant", content=content))
+    def add_assistant_message(self, content: Content, tool_calls: list[dict[str, Any]] | None = None) -> None:
+        self._messages.append(Message(role="assistant", content=content, tool_calls=tool_calls))
 
     def add_tool_results(self, results: list[Any]) -> None:
         for result in results:
@@ -46,6 +46,8 @@ class MasterMemory(Memory):
                 m["tool_call_id"] = msg.tool_call_id
             if msg.name:
                 m["name"] = msg.name
+            if msg.tool_calls:
+                m["tool_calls"] = msg.tool_calls
             messages.append(m)
         return messages
 

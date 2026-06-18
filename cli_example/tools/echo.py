@@ -21,4 +21,6 @@ class Echo(Tool):
         }
 
     def execute(self, **kwargs: Any) -> str:
-        return kwargs.get("input", "")
+        text = kwargs.get("input", "")
+        print(f"\n[echo] {text}")
+        return text

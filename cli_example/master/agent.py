@@ -1,14 +1,14 @@
 from __future__ import annotations
 from typing import Any, Generator
 
-from agent_template.core.agent import Agent, AgentConfig, StreamChunk
+from agent_template.core.agent import Agent, AgentConfig, StreamChunk, AbortEvent
 from agent_template.core.memory import Content
 from agent_template.cli_example.config import ollama_provider
 from agent_template.cli_example.master.memory import MasterMemory
 from agent_template.cli_example.subagents import RESEARCHER_TOOL
 from agent_template.cli_example.tools import Echo
 
-MODEL_NAME = "llama3"
+MODEL_NAME = "nemotron-3-nano:4b"
 MAX_TOKENS = 4096
 TEMPERATURE = 0.7
 
@@ -53,13 +53,13 @@ class MasterAgent(Agent):
         tools = [Echo(), RESEARCHER_TOOL]
         super().__init__(config=config, memory=memory, tools=tools)
 
-    def run(self, input: list[dict[str, Any]], system_prompt: str = "") -> Content:
+    def run(self, input: list[dict[str, Any]], system_prompt: str = "", abort: AbortEvent | None = None) -> Content:
         system_prompt = self._build_system_prompt()
-        return super().run(input, system_prompt=system_prompt)
+        return super().run(input, system_prompt=system_prompt, abort=abort)
 
-    def run_stream(self, input: list[dict[str, Any]], system_prompt: str = "") -> Generator[StreamChunk, None, Content]:
+    def run_stream(self, input: list[dict[str, Any]], system_prompt: str = "", abort: AbortEvent | None = None) -> Generator[StreamChunk, None, Content]:
         system_prompt = self._build_system_prompt()
-        yield from super().run_stream(input, system_prompt=system_prompt)
+        yield from super().run_stream(input, system_prompt=system_prompt, abort=abort)
 
     def _build_system_prompt(self) -> str:
         summary = self.memory.get_summary()

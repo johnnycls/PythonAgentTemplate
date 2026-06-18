@@ -11,7 +11,7 @@ class Memory(ABC):
         pass
 
     @abstractmethod
-    def add_assistant_message(self, content: Content) -> None:
+    def add_assistant_message(self, content: Content, tool_calls: list[dict[str, Any]] | None = None) -> None:
         pass
 
     @abstractmethod

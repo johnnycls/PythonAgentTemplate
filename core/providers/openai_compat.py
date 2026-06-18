@@ -7,10 +7,47 @@ from agent_template.core.agent import LLMResponse, ToolCall, StreamChunk
 class OpenAICompatProvider(LLMProvider):
     def __init__(self, name: str, api_key: str, base_url: str):
         super().__init__(name=name, _api_key=api_key, _base_url=base_url)
+        self._tiktoken_encoding = None
 
     def _get_client(self):
         from openai import OpenAI
         return OpenAI(api_key=self._api_key, base_url=self._base_url)
+
+    def _get_tiktoken_encoding(self):
+        if self._tiktoken_encoding is None:
+            import tiktoken
+            try:
+                self._tiktoken_encoding = tiktoken.encoding_for_model(self.name)
+            except KeyError:
+                self._tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+        return self._tiktoken_encoding
+
+    def _count_tokens_tiktoken(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+    ) -> int:
+        enc = self._get_tiktoken_encoding()
+        tokens = 4  # preamble overhead
+        if system_prompt:
+            tokens += len(enc.encode(system_prompt))
+        for msg in messages:
+            tokens += 4  # per-message overhead
+            role = msg.get("role", "")
+            tokens += len(enc.encode(role))
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                tokens += len(enc.encode(content))
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        tokens += len(enc.encode(str(block)))
+            if msg.get("tool_call_id"):
+                tokens += len(enc.encode(msg["tool_call_id"]))
+        if tools:
+            tokens += len(enc.encode(str(tools)))
+        return tokens
 
     def _parse_tool_calls(self, tool_calls_data: list[dict[str, Any]]) -> list[ToolCall]:
         import json
@@ -30,13 +67,16 @@ class OpenAICompatProvider(LLMProvider):
         tools: list[dict[str, Any]],
         model: str,
     ) -> int:
-        client = self._get_client()
-        input_items = self._format_messages_for_responses(messages, system_prompt)
-        response = client.responses.input_tokens.count(
-            model=model,
-            input=input_items,
-        )
-        return response.input_tokens
+        try:
+            client = self._get_client()
+            input_items = self._format_messages_for_responses(messages, system_prompt)
+            response = client.responses.input_tokens.count(
+                model=model,
+                input=input_items,
+            )
+            return response.input_tokens
+        except Exception:
+            return self._count_tokens_tiktoken(messages, system_prompt, tools)
 
     def _format_messages_for_responses(
         self,
@@ -185,13 +225,21 @@ class OpenAICompatProvider(LLMProvider):
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
+            tool_calls = msg.get("tool_calls")
             if role == "tool":
                 formatted.append({
                     "role": "tool",
                     "tool_call_id": msg.get("tool_call_id", ""),
                     "content": content,
                 })
-            elif role in ("user", "assistant"):
+            elif role == "assistant":
+                m: dict[str, Any] = {"role": role}
+                if content:
+                    m["content"] = self._normalize_content(content)
+                if tool_calls:
+                    m["tool_calls"] = tool_calls
+                formatted.append(m)
+            elif role == "user":
                 formatted.append({"role": role, "content": self._normalize_content(content)})
         return formatted
 

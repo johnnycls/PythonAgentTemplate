@@ -1,11 +1,15 @@
 from __future__ import annotations
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Generator
 
 from agent_template.core.agent.config import AgentConfig
-from agent_template.core.agent.types import ToolCall, ToolResult, StreamChunk
+from agent_template.core.agent.types import ToolCall, ToolResult, StreamChunk, AbortEvent
 from agent_template.core.memory import Memory, Content
 from agent_template.core.tools.base import Tool
+
+ABORTED_CONTENT: Content = [{"type": "text", "text": "Aborted by user"}]
+MAX_TURNS_CONTENT: Content = [{"type": "text", "text": "Max turns reached"}]
 
 
 class Agent:
@@ -19,10 +23,23 @@ class Agent:
         self.memory = memory
         self.tools = tools or []
 
-    def run(self, input: list[dict[str, Any]], system_prompt: str = "") -> Content:
+    @staticmethod
+    def _tool_calls_to_dicts(tool_calls: list[ToolCall]) -> list[dict[str, Any]]:
+        return [
+            {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)}}
+            for tc in tool_calls
+        ]
+
+    def _check_abort(self, abort: AbortEvent | None) -> bool:
+        return abort is not None and abort.is_set()
+
+    def run(self, input: list[dict[str, Any]], system_prompt: str = "", abort: AbortEvent | None = None) -> Content:
         self.memory.add_user_message(input)
 
         for turn in range(self.config.max_turns):
+            if self._check_abort(abort):
+                return ABORTED_CONTENT
+
             self._compact_if_needed(system_prompt)
 
             response = self.config.provider.complete(
@@ -34,7 +51,8 @@ class Agent:
                 **self.config.provider_kwargs,
             )
 
-            self.memory.add_assistant_message(response.content)
+            tool_calls_data = self._tool_calls_to_dicts(response.tool_calls) if response.tool_calls else None
+            self.memory.add_assistant_message(response.content, tool_calls=tool_calls_data)
 
             if response.tool_calls:
                 tool_results = self._execute_tools(response.tool_calls)
@@ -42,12 +60,15 @@ class Agent:
             else:
                 return response.content
 
-        return [{"type": "text", "text": "Max turns reached"}]
+        return MAX_TURNS_CONTENT
 
-    def run_stream(self, input: list[dict[str, Any]], system_prompt: str = "") -> Generator[StreamChunk, None, Content]:
+    def run_stream(self, input: list[dict[str, Any]], system_prompt: str = "", abort: AbortEvent | None = None) -> Generator[StreamChunk, None, Content]:
         self.memory.add_user_message(input)
 
         for turn in range(self.config.max_turns):
+            if self._check_abort(abort):
+                return ABORTED_CONTENT
+
             self._compact_if_needed(system_prompt)
 
             tool_calls: list[ToolCall] = []
@@ -61,24 +82,32 @@ class Agent:
                 output_schema=self.config.output_schema,
                 **self.config.provider_kwargs,
             ):
+                if self._check_abort(abort):
+                    break
+
                 if chunk.delta:
                     content.append({"type": "text", "text": chunk.delta})
-                    yield chunk
                 elif chunk.tool_name:
-                    yield chunk
+                    pass
                 elif chunk.tool_call:
                     tool_calls.append(chunk.tool_call)
+                yield chunk
 
-            if content:
-                self.memory.add_assistant_message(content)
+            if self._check_abort(abort):
+                return ABORTED_CONTENT
+
+            tool_calls_data = self._tool_calls_to_dicts(tool_calls) if tool_calls else None
+            self.memory.add_assistant_message(content, tool_calls=tool_calls_data)
 
             if tool_calls:
                 tool_results = self._execute_tools(tool_calls)
                 self.memory.add_tool_results(tool_results)
+                for call, result in zip(tool_calls, tool_results):
+                    yield StreamChunk(delta=f"[{call.name} result] {result.content}\n")
             else:
                 return content
 
-        return [{"type": "text", "text": "Max turns reached"}]
+        return MAX_TURNS_CONTENT
 
     def _compact_if_needed(self, system_prompt: str) -> None:
         token_count = self.config.provider.count_tokens(
